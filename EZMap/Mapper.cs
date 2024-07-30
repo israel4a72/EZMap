@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using System.Security.AccessControl;
 using EZMap.Attributes;
 using EZMap.Exceptions;
 
@@ -12,19 +13,19 @@ namespace EZMap
 
             if (referenceObject is null || resultObject is null) return default;
 
-            SetPropsValues(resultObject, referenceObject, a => a.Create);
+            MapReferenceToResult(resultObject, referenceObject, a => a.Create);
 
             return resultObject;
         }
-        public static IEnumerable<TResultType> MapToCreate<TResultType>(IEnumerable<TReferenceObject> entities)
+        public static IEnumerable<TResultType> MapToCreate<TResultType>(IEnumerable<TReferenceObject> references)
         {
-            if (entities is null || !entities.Any()) return [];
+            if (references is null || !references.Any()) return [];
 
-            TResultType[] resultObjectArray = new TResultType[entities.Count()];
+            TResultType[] resultObjectArray = new TResultType[references.Count()];
             resultObjectArray = resultObjectArray.Select(d => GetInstanceOf<TResultType>()).Where(e => e is not null).ToArray()!;
 
             for(int i = 0; i < resultObjectArray.Length; i++)
-                SetPropsValues(resultObjectArray[i], entities.ElementAt(i), a => a.Create);
+                MapReferenceToResult(resultObjectArray[i], references.ElementAt(i), a => a.Create);
 
             return resultObjectArray;
         }
@@ -34,20 +35,47 @@ namespace EZMap
 
             if (referenceObject is null || resultObject is null) return default;
 
-            SetPropsValues(resultObject, referenceObject, a => a.Update);
+            MapReferenceToResult(resultObject, referenceObject, a => a.Update);
 
             return resultObject;
         }
-
-        private static void SetPropsValues<TResultType>(TResultType resultObject, TReferenceObject referenceObject, Func<CrudDefinition, bool> crudSelector)
+        public static TResultType? MapToRead<TResultType>(TReferenceObject referenceObject)
         {
-            IEnumerable<PropertyInfo> referenceObjectProps = GetPropertiesByCRUDCondition(typeof(TReferenceObject), crudSelector);
+            var resultObject = GetInstanceOf<TResultType>();
 
-            foreach (var prop in resultObject!.GetType().GetProperties())
+            if (referenceObject is null || resultObject is null) return default;
+
+            MapReferenceToResult(resultObject, referenceObject, a => a.Read);
+
+            return resultObject;
+        }
+        public static IEnumerable<TResultType> MapToRead<TResultType>(IEnumerable<TReferenceObject> references)
+        {
+            if (references is null || !references.Any()) return [];
+
+            TResultType[] resultObjectArray = new TResultType[references.Count()];
+            resultObjectArray = resultObjectArray.Select(d => GetInstanceOf<TResultType>()).Where(e => e is not null).ToArray()!;
+
+            for (int i = 0; i < resultObjectArray.Length; i++)
+                MapReferenceToResult(resultObjectArray[i], references.ElementAt(i), a => a.Read);
+
+            return resultObjectArray;
+        }
+
+        private static void MapReferenceToResult<TResultType>(TResultType resultObject, TReferenceObject referenceObject, Func<CrudDefinition, bool> crudSelector)
+        {
+            IEnumerable<PropertyInfo> enabledProps = GetPropertiesByCRUDCondition(typeof(TReferenceObject), crudSelector);
+
+            if (!enabledProps.Any())
+                enabledProps = GetPropertiesByCRUDCondition(typeof(TResultType), crudSelector);
+
+            IEnumerable<PropertyInfo> referencePropsEnabled = referenceObject!.GetType().GetProperties().Where(p => enabledProps.Any(ep => ep.Name == p.Name && ep.PropertyType == p.PropertyType));
+
+            foreach (var resultObjectProp in resultObject!.GetType().GetProperties())
             {
-                PropertyInfo? propToMap = referenceObjectProps.FirstOrDefault(p => p.Name == prop.Name && p.PropertyType == prop.PropertyType);
-                if (propToMap != null)
-                    prop.SetValue(resultObject, propToMap.GetValue(referenceObject));
+                PropertyInfo? referenceProps = referencePropsEnabled.FirstOrDefault(p => p.Name == resultObjectProp.Name && p.PropertyType == resultObjectProp.PropertyType);
+                if (referenceProps != null)
+                    resultObjectProp.SetValue(resultObject, referenceProps.GetValue(referenceObject));
             }
         }
         private static IEnumerable<PropertyInfo> GetPropertiesByCRUDCondition(Type referenceObjectType, Func<CrudDefinition, bool> crudSelector)
